@@ -12,6 +12,8 @@ import { VoicePlaygroundPage } from './pages/VoicePlaygroundPage';
 import type { Agent, AgentFilters, Conversation, ConversationDetail, ConversationFilters, DocumentFilters, DocumentItem, Stats, User, VoiceSession } from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:4000';
+const TRANSCRIPTION_WS_URL = new URL('/api/voice/transcription', API_BASE);
+TRANSCRIPTION_WS_URL.protocol = TRANSCRIPTION_WS_URL.protocol === 'https:' ? 'wss:' : 'ws:';
 const apiClient = axios.create({ baseURL: API_BASE });
 apiClient.interceptors.request.use((request) => {
   const token = localStorage.getItem('voicepilot-token');
@@ -259,19 +261,31 @@ function AppShell() {
     }
   };
 
-  const startVoiceSession = async (agentId: string): Promise<VoiceSession> => {
+  const startVoiceSession = async (agentId: string, timeZone: string): Promise<VoiceSession> => {
     const token = localStorage.getItem('voicepilot-token');
     if (!token) throw new Error('Your session has expired. Please sign in again.');
 
     try {
       const response = await apiClient.post(
         '/api/voice/session',
-        { agentId },
+        { agentId, timeZone },
         { headers: { Authorization: `Bearer ${token}` } },
       );
       return response.data as VoiceSession;
     } catch (error) {
       throw new Error(apiErrorMessage(error, 'Could not start the voice session.'));
+    }
+  };
+
+  const createTranscriptionTicket = async (sessionId: string): Promise<string> => {
+    try {
+      const response = await apiClient.post(
+        '/api/voice/transcription-ticket',
+        { sessionId },
+      );
+      return response.data.ticket as string;
+    } catch (error) {
+      throw new Error(apiErrorMessage(error, 'Could not authorize the transcription session.'));
     }
   };
 
@@ -415,6 +429,8 @@ function AppShell() {
               agents={agents}
               documents={documents}
               onStartSession={startVoiceSession}
+              onCreateTranscriptionTicket={createTranscriptionTicket}
+              transcriptionWebSocketUrl={TRANSCRIPTION_WS_URL.toString()}
               onEndSession={endVoiceSession}
               onSaveMessage={saveVoiceMessage}
             />

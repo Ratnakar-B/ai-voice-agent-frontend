@@ -15,6 +15,7 @@ export type Agent = {
   model: string;
   instructions: string;
   welcomeMessage: string;
+  conversationScript: string;
   speakingStyle: string;
   responseBehavior: string;
   temperature: number;

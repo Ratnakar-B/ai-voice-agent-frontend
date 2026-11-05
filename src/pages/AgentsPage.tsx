@@ -63,7 +63,8 @@ const emptyAgent: AgentInput = {
   language: 'English',
   model: 'gemini-3.8-flash',
   instructions: 'Be helpful, concise, and friendly.',
-  welcomeMessage: 'Hello! How can I help you today?',
+  welcomeMessage: 'How can I help you today?',
+  conversationScript: 'Greet the caller warmly. Ask how you can help, then listen and respond one step at a time. Use the knowledge base for business details and never guess. Thank the caller before ending the conversation.',
   speakingStyle: 'Natural and friendly',
   responseBehavior: 'Balanced',
   temperature: 0.7,
@@ -320,6 +321,7 @@ export function AgentsPage({
             model: agent.model,
             instructions: agent.instructions,
             welcomeMessage: agent.welcomeMessage,
+            conversationScript: agent.conversationScript ?? '',
             speakingStyle: agent.speakingStyle ?? 'Natural and friendly',
             responseBehavior: agent.responseBehavior ?? 'Balanced',
             temperature: agent.temperature ?? 0.7,
@@ -364,6 +366,7 @@ export function AgentsPage({
         model: agent.model,
         instructions: agent.instructions,
         welcomeMessage: agent.welcomeMessage,
+        conversationScript: agent.conversationScript ?? '',
         speakingStyle: agent.speakingStyle ?? 'Natural and friendly',
         responseBehavior: agent.responseBehavior ?? 'Balanced',
         temperature: agent.temperature ?? 0.7,
@@ -491,7 +494,8 @@ export function AgentsPage({
             </div>
             <label>Description<input required value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
             <label>Agent instructions<textarea required value={form.instructions} onChange={(event) => setForm({ ...form, instructions: event.target.value })} /></label>
-            <label>Welcome message<input required value={form.welcomeMessage} onChange={(event) => setForm({ ...form, welcomeMessage: event.target.value })} /></label>
+            <label>Welcome message<input required value={form.welcomeMessage} onChange={(event) => setForm({ ...form, welcomeMessage: event.target.value })} /><small>Personalized with the local time of day and agent name.</small></label>
+            <label>Conversation script<textarea value={form.conversationScript} onChange={(event) => setForm({ ...form, conversationScript: event.target.value })} placeholder="Describe what the agent should say and do at each stage of the conversation." /><small>Give the agent a step-by-step flow. It will use the knowledge base to answer business questions and thank callers before ending.</small></label>
             {errorMessage && <p className="call-status error" role="alert">{errorMessage}</p>}
             <div className="action-row">
               <button type="submit" className="primary-button" disabled={isSaving}>{isSaving ? 'Saving...' : editingId ? 'Save changes' : 'Create agent'}</button>

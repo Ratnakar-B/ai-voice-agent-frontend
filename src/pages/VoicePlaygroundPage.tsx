@@ -24,11 +24,65 @@ import type { Agent, DocumentItem, VoiceSession } from '../types';
 const INPUT_SAMPLE_RATE = 16000;
 const OUTPUT_SAMPLE_RATE = 24000;
 
+function getTranscriptionLanguageCodes(language: string): string[] {
+  const normalized = language.trim().toLocaleLowerCase();
+  const namedLanguages: Record<string, string> = {
+    arabic: 'ar-SA',
+    bengali: 'bn-BD',
+    chinese: 'zh-CN',
+    english: 'en-US',
+    french: 'fr-FR',
+    german: 'de-DE',
+    gujarati: 'gu-IN',
+    hindi: 'hi-IN',
+    kannada: 'kn-IN',
+    korean: 'ko-KR',
+    malayalam: 'ml-IN',
+    marathi: 'mr-IN',
+    portuguese: 'pt-BR',
+    punjabi: 'pa-IN',
+    russian: 'ru-RU',
+    spanish: 'es-ES',
+    tamil: 'ta-IN',
+    telugu: 'te-IN',
+    urdu: 'ur-PK',
+  };
+  const namedMatch = Object.entries(namedLanguages).find(([name]) =>
+    normalized === name || normalized.startsWith(`${name} `) || normalized.startsWith(`${name}(`),
+  );
+  if (namedMatch) return [namedMatch[1]];
+
+  const localeMatch = language.trim().match(/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i);
+  return localeMatch ? [localeMatch[0]] : [];
+}
+
+function mergeTranscription(current: string, chunk: string): string {
+  const previous = current.trimEnd();
+  const next = chunk.trim();
+  if (!previous) return next;
+  if (!next) return previous;
+
+  const previousLower = previous.toLocaleLowerCase();
+  const nextLower = next.toLocaleLowerCase();
+  if (nextLower.startsWith(previousLower)) return next;
+  if (previousLower.startsWith(nextLower) || previousLower.endsWith(nextLower)) return previous;
+
+  const maxOverlap = Math.min(previous.length, next.length);
+  for (let overlap = maxOverlap; overlap > 1; overlap -= 1) {
+    if (previousLower.endsWith(nextLower.slice(0, overlap))) {
+      return `${previous}${next.slice(overlap)}`;
+    }
+  }
+
+  return `${previous} ${next}`;
+}
+
 type LiveServerMessage = {
   setupComplete?: unknown;
   error?: { message?: string };
   serverContent?: {
     inputTranscription?: { text?: string; finished?: boolean };
+    interimInputTranscription?: { text?: string };
     outputTranscription?: { text?: string; finished?: boolean };
     modelTurn?: { parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }> };
     turnComplete?: boolean;
@@ -112,6 +166,8 @@ export function VoicePlaygroundPage({
   agents,
   documents,
   onStartSession,
+  onCreateTranscriptionTicket,
+  transcriptionWebSocketUrl,
   onEndSession,
   onSaveMessage,
 }: {
@@ -120,12 +176,15 @@ export function VoicePlaygroundPage({
   clearTranscript: () => void;
   agents: Agent[];
   documents: DocumentItem[];
-  onStartSession: (agentId: string) => Promise<VoiceSession>;
+  onStartSession: (agentId: string, timeZone: string) => Promise<VoiceSession>;
+  onCreateTranscriptionTicket: (sessionId: string) => Promise<string>;
+  transcriptionWebSocketUrl: string;
   onEndSession: (sessionId: string) => Promise<void>;
   onSaveMessage: (sessionId: string, role: 'user' | 'assistant', content: string) => Promise<void>;
 }) {
   const activeStream = useRef<MediaStream | null>(null);
   const activeSocket = useRef<WebSocket | null>(null);
+  const transcriptionSocket = useRef<WebSocket | null>(null);
   const audioContext = useRef<AudioContext | null>(null);
   const microphoneSource = useRef<MediaStreamAudioSourceNode | null>(null);
   const audioProcessor = useRef<ScriptProcessorNode | null>(null);
@@ -134,8 +193,9 @@ export function VoicePlaygroundPage({
   const sessionId = useRef<string | null>(null);
   const isMutedRef = useRef(false);
   const isEndingRef = useRef(false);
-  const inputDraft = useRef('');
   const outputDraft = useRef('');
+  const transcriptionFinalResolver = useRef<(() => void) | null>(null);
+  const [interimTranscript, setInterimTranscript] = useState('');
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [isStarting, setIsStarting] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
@@ -153,6 +213,11 @@ export function VoicePlaygroundPage({
     void onSaveMessage(activeSessionId, role, content).catch((error: unknown) => {
       setErrorMessage(error instanceof Error ? error.message : 'Transcript could not be saved.');
     });
+  };
+
+  const flushTranscriptDrafts = () => {
+    if (outputDraft.current.trim()) recordTranscript('assistant', outputDraft.current.trim());
+    outputDraft.current = '';
   };
 
   const endStoredSession = () => {
@@ -188,9 +253,15 @@ export function VoicePlaygroundPage({
   };
 
   const stopSocket = () => {
+    transcriptionFinalResolver.current?.();
     const socket = activeSocket.current;
     activeSocket.current = null;
     if (socket && socket.readyState < WebSocket.CLOSING) socket.close(1000, 'Call ended');
+    const transcription = transcriptionSocket.current;
+    transcriptionSocket.current = null;
+    if (transcription && transcription.readyState < WebSocket.CLOSING) {
+      transcription.close(1000, 'Call ended');
+    }
   };
 
   const stopCallResources = () => {
@@ -256,29 +327,15 @@ export function VoicePlaygroundPage({
       playbackCursor.current = audioContext.current?.currentTime ?? 0;
     }
 
-    const input = content.inputTranscription;
-    if (input?.text) inputDraft.current = input.text;
-    if (input?.finished && inputDraft.current) {
-      recordTranscript('user', inputDraft.current);
-      inputDraft.current = '';
-    }
-
     const output = content.outputTranscription;
-    if (output?.text) outputDraft.current = output.text;
+    if (output?.text) outputDraft.current = mergeTranscription(outputDraft.current, output.text);
     if (output?.finished && outputDraft.current) {
       recordTranscript('assistant', outputDraft.current);
       outputDraft.current = '';
     }
 
     if (content.turnComplete) {
-      if (inputDraft.current) {
-        recordTranscript('user', inputDraft.current);
-        inputDraft.current = '';
-      }
-      if (outputDraft.current) {
-        recordTranscript('assistant', outputDraft.current);
-        outputDraft.current = '';
-      }
+      flushTranscriptDrafts();
     }
 
     content.modelTurn?.parts?.forEach((part) => {
@@ -293,6 +350,115 @@ export function VoicePlaygroundPage({
           setIsActive(false);
         }
       }
+    });
+  };
+
+  const connectTranscriptionSession = async (sessionId: string) => {
+    const ticket = await onCreateTranscriptionTicket(sessionId);
+    const url = new URL(transcriptionWebSocketUrl);
+    url.searchParams.set('ticket', ticket);
+    url.searchParams.set('sessionId', sessionId);
+    const socket = new WebSocket(url);
+    transcriptionSocket.current = socket;
+
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const timeout = window.setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        socket.close();
+        reject(new Error('Timed out while connecting to the speech transcriber.'));
+      }, 20000);
+      const fail = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        reject(error);
+      };
+
+      socket.onopen = () => {
+        try {
+          socket.send(JSON.stringify({
+            setup: {
+              model: 'models/gemini-3.5-transcribe-live',
+              generationConfig: { responseModalities: ['TEXT'] },
+              inputAudioTranscription: {
+                languageCodes: getTranscriptionLanguageCodes(activeAgent?.language ?? 'English'),
+                mode: 'SMART',
+              },
+            },
+          }));
+        } catch (error) {
+          fail(error instanceof Error ? error : new Error('Could not start the speech transcriber.'));
+        }
+      };
+
+      socket.onmessage = async (event: MessageEvent) => {
+        let message: LiveServerMessage;
+        try {
+          message = await decodeWebSocketMessage(event.data);
+        } catch (error) {
+          const messageError = error instanceof Error ? error.message : 'The speech transcriber returned an unreadable response.';
+          if (settled) {
+            setErrorMessage(messageError);
+            stopCallResources();
+            endStoredSession();
+            setIsActive(false);
+          } else {
+            fail(new Error(messageError));
+          }
+          return;
+        }
+
+        if (message.error) {
+          const error = new Error(message.error.message ?? 'The speech transcriber returned an error.');
+          if (settled) {
+            setErrorMessage(error.message);
+            stopCallResources();
+            endStoredSession();
+            setIsActive(false);
+          } else {
+            fail(error);
+          }
+          return;
+        }
+        if (message.setupComplete !== undefined) {
+          if (!settled) {
+            settled = true;
+            window.clearTimeout(timeout);
+            resolve();
+          }
+          return;
+        }
+
+        const content = message.serverContent;
+        if (content?.interimInputTranscription?.text) {
+          setInterimTranscript(content.interimInputTranscription.text);
+        }
+        if (content?.inputTranscription?.text) {
+          const finalText = content.inputTranscription.text.trim();
+          if (finalText) recordTranscript('user', finalText);
+          setInterimTranscript('');
+          transcriptionFinalResolver.current?.();
+          transcriptionFinalResolver.current = null;
+        }
+      };
+
+      socket.onerror = () => fail(new Error(
+        'Could not connect to the Gemini speech transcriber. Check the server logs and Gemini API key/model access.',
+      ));
+      socket.onclose = (event) => {
+        transcriptionFinalResolver.current?.();
+        if (!settled) {
+          fail(new Error(event.reason || 'The speech transcriber closed before it was ready.'));
+        } else if (transcriptionSocket.current === socket && !isEndingRef.current) {
+          transcriptionSocket.current = null;
+          setErrorMessage(event.reason || 'The speech transcriber connection was closed.');
+          stopCallResources();
+          endStoredSession();
+          setIsActive(false);
+        }
+      };
     });
   };
 
@@ -334,7 +500,6 @@ export function VoicePlaygroundPage({
                 },
                 systemInstruction: { parts: [{ text: session.systemInstruction }] },
                 realtimeInputConfig: { automaticActivityDetection: { disabled: false } },
-                inputAudioTranscription: {},
                 outputAudioTranscription: {},
               },
             }),
@@ -408,6 +573,29 @@ export function VoicePlaygroundPage({
     setStatusMessage(`Connected to Gemini Live using ${session.model}.`);
   };
 
+  const finishTranscriptionSession = async () => {
+    const socket = transcriptionSocket.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+
+    await new Promise<void>((resolve, reject) => {
+      let timeout = 0;
+      const finish = () => {
+        window.clearTimeout(timeout);
+        if (transcriptionFinalResolver.current === finish) transcriptionFinalResolver.current = null;
+        resolve();
+      };
+      transcriptionFinalResolver.current = finish;
+      timeout = window.setTimeout(finish, 1500);
+      try {
+        socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
+      } catch (error) {
+        window.clearTimeout(timeout);
+        transcriptionFinalResolver.current = null;
+        reject(error);
+      }
+    });
+  };
+
   const startCall = async () => {
     setErrorMessage('');
     setStatusMessage('');
@@ -429,18 +617,40 @@ export function VoicePlaygroundPage({
     setIsStarting(true);
     setStatusMessage('Waiting for microphone permission...');
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
+      const [streamResult, sessionResult] = await Promise.allSettled([
+        navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        }),
+        onStartSession(selectedAgent.id, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'),
+      ]);
+      if (streamResult.status === 'rejected' || sessionResult.status === 'rejected') {
+        if (streamResult.status === 'fulfilled') {
+          streamResult.value.getTracks().forEach((track) => track.stop());
+        }
+        if (sessionResult.status === 'fulfilled') {
+          try {
+            await onEndSession(sessionResult.value.sessionId);
+          } catch (error) {
+            console.error('Could not close the unused voice session.', error);
+          }
+        }
+        if (streamResult.status === 'rejected') throw streamResult.reason;
+        if (sessionResult.status === 'rejected') throw sessionResult.reason;
+        throw new Error('Could not prepare the voice session.');
+      }
+      const stream = streamResult.value;
+      const session = sessionResult.value;
       activeStream.current = stream;
       const context = new AudioContext();
       audioContext.current = context;
       await context.resume();
 
-      setStatusMessage('Microphone connected. Requesting a secure Gemini Live session...');
-      const session = await onStartSession(selectedAgent.id);
+      setStatusMessage('Microphone connected. Connecting to Gemini Live...');
       sessionId.current = session.sessionId;
-      await connectLiveSession(session);
+      await Promise.all([
+        connectLiveSession(session),
+        connectTranscriptionSession(session.sessionId),
+      ]);
 
       const source = context.createMediaStreamSource(stream);
       const processor = context.createScriptProcessor(4096, 1, 1);
@@ -450,15 +660,20 @@ export function VoicePlaygroundPage({
         event.outputBuffer.getChannelData(0).fill(0);
         const socket = activeSocket.current;
         if (!socket || socket.readyState !== WebSocket.OPEN || isMutedRef.current) return;
+        const transcription = transcriptionSocket.current;
+        if (!transcription || transcription.readyState !== WebSocket.OPEN) {
+          setErrorMessage('The speech transcriber connection was interrupted.');
+          isEndingRef.current = true;
+          stopCallResources();
+          endStoredSession();
+          setIsActive(false);
+          return;
+        }
         const pcm = resampleTo16k(event.inputBuffer.getChannelData(0), context.sampleRate);
+        const audio = { data: encodeBase64(pcm), mimeType: 'audio/pcm;rate=16000' };
         try {
-          socket.send(
-            JSON.stringify({
-              realtimeInput: {
-                audio: { data: encodeBase64(pcm), mimeType: 'audio/pcm;rate=16000' },
-              },
-            }),
-          );
+          socket.send(JSON.stringify({ realtimeInput: { audio } }));
+          transcription.send(JSON.stringify({ realtimeInput: { audio } }));
         } catch (error) {
           console.error('Could not send microphone audio to Gemini Live.', error);
           setErrorMessage('The Gemini Live audio connection was interrupted.');
@@ -498,14 +713,19 @@ export function VoicePlaygroundPage({
     setIsEnding(true);
     setIsActive(false);
     setIsMuted(false);
-    stopCallResources();
+    flushTranscriptDrafts();
+    setInterimTranscript('');
+    stopAudio();
 
     try {
+      await finishTranscriptionSession();
+      stopSocket();
       if (sessionId.current) await onEndSession(sessionId.current);
       sessionId.current = null;
       setStatusMessage('Call ended. Your microphone is off.');
       updateTranscript('System: Call ended.');
     } catch (error) {
+      stopSocket();
       setErrorMessage(getErrorMessage(error, 'Microphone stopped, but the voice session could not be closed.'));
     } finally {
       isEndingRef.current = false;
@@ -515,7 +735,7 @@ export function VoicePlaygroundPage({
 
   const activeAgent = agents.find((agent) => agent.id === selectedAgentId) ??
     agents.find((agent) => agent.status === 'active');
-  const transcriptIsEmpty = transcript.length === 0;
+  const transcriptIsEmpty = transcript.length === 0 && !interimTranscript;
   const currentStatus = errorMessage || statusMessage ||
     (isActive ? `Connected to ${activeAgent?.name ?? 'your agent'}. Start speaking.` : 'Ready to talk');
   const agentInstructions = activeAgent?.instructions || 'Create an agent to add its instructions here.';
@@ -653,7 +873,7 @@ export function VoicePlaygroundPage({
       <section className="playground-transcript-card">
         <div className="playground-transcript-heading">
           <h2>Conversation transcript</h2>
-          <button type="button" className="playground-clear-transcript" disabled={transcriptIsEmpty} onClick={clearTranscript}><Trash2 size={14} /> Clear transcript</button>
+          <button type="button" className="playground-clear-transcript" disabled={transcriptIsEmpty} onClick={() => { clearTranscript(); setInterimTranscript(''); }}><Trash2 size={14} /> Clear transcript</button>
         </div>
         {transcriptIsEmpty ? (
           <div className="playground-transcript-empty">
@@ -671,6 +891,7 @@ export function VoicePlaygroundPage({
                 {line}
               </div>
             ))}
+            {interimTranscript && <div className="playground-transcript-line from-user is-interim">You: {interimTranscript}</div>}
           </div>
         )}
       </section>

@@ -57,7 +57,7 @@ export function AuthPage({
               <br />
               <span className="gradient-text">AI Voice</span> Agents
             </h1>
-            <p>Build, deploy and manage AI voice agents that chat in the browser and handle calls with natural conversations.</p>
+            <p>Use a browser-based AI voice agent for natural, real-time conversations. Phone calling and other expanded features are coming soon.</p>
           </div>
           <div className="auth-hero-art" aria-hidden="true">
             <img src="/voice_agent.png" alt="" />
@@ -66,10 +66,10 @@ export function AuthPage({
 
         <div className="feature-grid">
           {[
-            { icon: <Mic size={17} />, title: 'Browser Voice Chat', subtitle: 'Real-time conversations' },
-            { icon: <PhoneCall size={17} />, title: 'Inbound & Outbound Calls', subtitle: 'Automate customer calls' },
+            { icon: <Mic size={17} />, title: 'Browser Voice Chat', subtitle: 'Available now' },
+            { icon: <PhoneCall size={17} />, title: 'Phone Calling', subtitle: 'Coming soon' },
             { icon: <FileText size={17} />, title: 'Knowledge Base', subtitle: 'Ground answers in your docs' },
-            { icon: <BarChart3 size={17} />, title: 'Monitor & Scale', subtitle: 'Track performance' },
+            { icon: <BarChart3 size={17} />, title: 'More Capabilities', subtitle: 'Coming soon' },
           ].map((feature) => (
             <div className="feature-item" key={feature.title}>
               <div className="feature-icon">{feature.icon}</div>
@@ -100,7 +100,7 @@ export function AuthPage({
           <h2>{mode === 'login' ? 'Welcome back' : 'Create your account'}</h2>
           <p className="subtitle">{mode === 'login' ? 'Sign in to your account to continue' : 'Create an account to get started'}</p>
 
-          <form className="auth-form" onSubmit={handleSubmit}>
+          <form key={mode} className="auth-form" onSubmit={handleSubmit}>
             {mode === 'register' && (
               <label className="field-group">
                 <div className="input-wrap">
@@ -112,7 +112,7 @@ export function AuthPage({
             <label className="field-group">
               <div className="input-wrap icon-left">
                 <Mail size={16} />
-              <input aria-label="Email address" value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Email address" autoComplete="email" required />
+              <input aria-label="Email address" value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Email address" autoComplete={mode === 'login' ? 'username' : 'email'} required />
               </div>
             </label>
 
@@ -130,8 +130,14 @@ export function AuthPage({
                   maxLength={256}
                   required
                 />
-                <button type="button" className="show-password" onClick={() => setShowPassword((state) => !state)}>
-                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                <button
+                  type="button"
+                  className="show-password"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-pressed={showPassword}
+                  onClick={() => setShowPassword((visible) => !visible)}
+                >
+                  {showPassword ? <Eye size={16} /> : <EyeOff size={16} />}
                 </button>
               </div>
             </label>
@@ -151,6 +157,10 @@ export function AuthPage({
               className="account-switch"
               onClick={() => {
                 setErrorMessage('');
+                setShowPassword(false);
+                setName('');
+                setEmail('');
+                setPassword('');
                 setMode((state) => (state === 'login' ? 'register' : 'login'));
               }}
             >
