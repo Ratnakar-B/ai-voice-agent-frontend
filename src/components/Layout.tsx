@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { AudioLines, BookOpen, ChevronDown, Headphones, Home, MessageSquare, UsersRound } from 'lucide-react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
+import { AgentScopeNote } from './AgentScopeNote';
 import type { User } from '../types';
 
 const navItems = [
@@ -41,6 +42,10 @@ export function Layout({ user, children }: { user: User; children: ReactNode }) 
             </NavLink>
           ))}
         </nav>
+
+        <div className="sidebar-card sidebar-scope-card">
+          <AgentScopeNote />
+        </div>
       </aside>
 
       <main className={`main-panel${isDashboard ? ' dashboard-main' : ''}${isAgents ? ' agents-main' : ''}${isPlayground ? ' playground-main' : ''}${isKnowledge ? ' knowledge-main' : ''}${isConversations ? ' conversations-main' : ''}${isSettings ? ' settings-main' : ''}`}>

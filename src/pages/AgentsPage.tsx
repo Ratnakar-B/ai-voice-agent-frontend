@@ -23,14 +23,13 @@ type AgentInput = Omit<Agent, 'id' | 'lastActive' | 'conversationCount'>;
 type AgentSort = AgentFilters['sort'];
 
 const agentAvatars = [
-  { src: '/agent01.jpg', label: 'Portrait 1' },
-  { src: '/agent02.jfif', label: 'Portrait 2' },
-  { src: '/agent03.jfif', label: 'Portrait 3' },
-  { src: '/agent04.jfif', label: 'Portrait 4' },
-  { src: '/agent05.jfif', label: 'Portrait 5' },
+  { src: '/agent01.jpg', voice: 'Kore' },
+  { src: '/agent02.jfif', voice: 'Aoede' },
+  { src: '/agent03.jfif', voice: 'Charon' },
+  { src: '/agent04.jfif', voice: 'Fenrir' },
+  { src: '/agent05.jfif', voice: 'Puck' },
 ];
 const defaultAgentAvatar = agentAvatars[0].src;
-const supportedVoices = ['Kore', 'Aoede', 'Charon', 'Fenrir', 'Puck'];
 const previewSampleRate = 24000;
 
 async function decodePreviewFrame(data: unknown): Promise<{
@@ -148,6 +147,7 @@ export function AgentsPage({
   }, []);
 
   const previewVoice = async (voice: string) => {
+    if (form?.voice !== voice) return;
     stopVoicePreview();
     setErrorMessage('');
     setPreviewingVoice(voice);
@@ -316,7 +316,7 @@ export function AgentsPage({
             name: agent.name,
             description: agent.description,
             status: agent.status,
-            voice: agent.voice,
+            voice: agentAvatars.find((avatar) => avatar.voice === agent.voice)?.voice ?? agentAvatars[0].voice,
             language: agent.language,
             model: agent.model,
             instructions: agent.instructions,
@@ -327,7 +327,7 @@ export function AgentsPage({
             temperature: agent.temperature ?? 0.7,
             knowledgeDocumentIds: agent.knowledgeDocumentIds ?? [],
             deployment: agent.deployment ?? { browserVoice: true, inboundCalls: false, outboundCalls: false },
-            avatar: agent.avatar ?? defaultAgentAvatar,
+            avatar: agentAvatars.find((avatar) => avatar.voice === agent.voice)?.src ?? agent.avatar ?? defaultAgentAvatar,
           }
         : { ...emptyAgent },
     );
@@ -336,6 +336,7 @@ export function AgentsPage({
   const saveAgent = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!form) return;
+    stopVoicePreview();
     setIsSaving(true);
     setErrorMessage('');
     try {
@@ -454,42 +455,54 @@ export function AgentsPage({
           </div>
           <form className="agent-form agents-editor-form" onSubmit={saveAgent}>
             <fieldset className="agent-avatar-picker">
-              <legend>Agent picture</legend>
-              <div className="agent-avatar-options" role="radiogroup" aria-label="Choose an agent picture">
+              <legend>Choose a portrait and voice</legend>
+              <div className="agent-avatar-options">
                 {agentAvatars.map((avatar, index) => (
-                  <label className={`agent-avatar-option${form.avatar === avatar.src ? ' is-selected' : ''}`} key={avatar.src}>
-                    <input
-                      type="radio"
-                      name="agent-avatar"
-                      value={avatar.src}
-                      checked={form.avatar === avatar.src}
-                      onChange={() => setForm({ ...form, avatar: avatar.src })}
-                    />
-                    <img src={avatar.src} alt={avatar.label} />
-                    <span>{avatar.label}</span>
-                    <span className="agent-avatar-check" aria-hidden="true">{index + 1}</span>
-                  </label>
+                  <div className="agent-avatar-choice" key={avatar.src}>
+                    <label className={`agent-avatar-option${form.avatar === avatar.src ? ' is-selected' : ''}`}>
+                      <input
+                        type="radio"
+                        name="agent-avatar"
+                        value={avatar.src}
+                        checked={form.avatar === avatar.src}
+                        onChange={() => {
+                          stopVoicePreview();
+                          setForm((current) => current ? { ...current, avatar: avatar.src, voice: avatar.voice } : current);
+                        }}
+                      />
+                      <img src={avatar.src} alt="" />
+                      <span>{avatar.voice}</span>
+                      <span className="agent-avatar-check" aria-hidden="true">{index + 1}</span>
+                    </label>
+                    <button
+                      type="button"
+                      className="agent-avatar-preview"
+                      aria-label={
+                        previewingVoice === avatar.voice
+                          ? `Stop ${avatar.voice} voice preview`
+                          : form.voice === avatar.voice
+                            ? `Preview ${avatar.voice} voice`
+                            : `Select the ${avatar.voice} portrait to preview`
+                      }
+                      disabled={isSaving || (form.voice !== avatar.voice && previewingVoice !== avatar.voice)}
+                      onClick={() => {
+                        if (previewingVoice === avatar.voice) stopVoicePreview();
+                        else if (form.voice === avatar.voice) void previewVoice(avatar.voice);
+                      }}
+                    >
+                      {previewingVoice === avatar.voice ? <Square size={12} fill="currentColor" /> : <Play size={12} fill="currentColor" />}
+                      {previewingVoice === avatar.voice ? 'Playing' : 'Preview'}
+                    </button>
+                  </div>
                 ))}
               </div>
+              <p className="agent-avatar-selected-voice" aria-live="polite">Selected voice: <strong>{form.voice}</strong></p>
             </fieldset>
             <div className="two-inputs">
               <label>Agent name<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
               <label>Language<input required value={form.language} onChange={(event) => setForm({ ...form, language: event.target.value })} /></label>
             </div>
             <div className="two-inputs">
-              <div className="agent-voice-control">
-                <label>Voice<select value={form.voice} onChange={(event) => { stopVoicePreview(); setForm({ ...form, voice: event.target.value }); }}>{supportedVoices.map((voice) => <option key={voice} value={voice}>{voice}</option>)}</select></label>
-                <button
-                  type="button"
-                  className="agent-voice-preview"
-                  aria-label={previewingVoice === form.voice ? `Stop ${form.voice} voice preview` : `Play ${form.voice} voice preview`}
-                  disabled={isSaving}
-                  onClick={() => previewingVoice === form.voice ? stopVoicePreview() : void previewVoice(form.voice)}
-                >
-                  {previewingVoice === form.voice ? <Square size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
-                  {previewingVoice === form.voice ? 'Playing...' : 'Preview'}
-                </button>
-              </div>
               <label>Status<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as AgentInput['status'] })}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
             </div>
             <label>Description<input required value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>

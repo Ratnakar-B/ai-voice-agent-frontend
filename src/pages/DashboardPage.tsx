@@ -60,11 +60,11 @@ export function DashboardPage({
   const firstName = user.name.trim().split(/\s+/)[0] || 'there';
   const activity = getActivity(conversations, now);
   const maxActivity = Math.max(...activity.map((day) => day.count));
+  const activityMidpoint = maxActivity > 1 ? Math.ceil(maxActivity / 2) : '';
   const hasRecentActivity = maxActivity > 0;
   const recentConversations = [...conversations]
-    .sort((left, right) => new Date(right.startedAt ?? 0).getTime() - new Date(left.startedAt ?? 0).getTime())
-    .slice(0, 4);
-  const recentAgents = agents.slice(0, 2);
+    .sort((left, right) => new Date(right.startedAt ?? 0).getTime() - new Date(left.startedAt ?? 0).getTime());
+  const recentAgents = [...agents];
 
   return (
     <div className="dashboard-page">
@@ -106,13 +106,13 @@ export function DashboardPage({
           </div>
           <div className="activity-chart" role="img" aria-label={`Conversation activity over the last seven days: ${activity.map((day) => `${day.title}: ${day.count}`).join(', ')}`}>
             <div className="activity-axis" aria-hidden="true">
-              <span>{maxActivity}</span><span>{Math.ceil(maxActivity / 2)}</span><span>0</span>
+              <span>{maxActivity}</span><span>{activityMidpoint}</span><span>0</span>
             </div>
             <div className="activity-bars">
               {activity.map((day) => (
                 <div className="activity-day" key={day.title} title={`${day.title}: ${day.count} conversations`}>
                   <div className="activity-track">
-                    <span className="activity-bar" style={{ height: `${day.count ? Math.max(12, (day.count / Math.max(maxActivity, 1)) * 100) : 0}%` }} />
+                    <span className={`activity-bar${day.count ? '' : ' is-empty'}`} style={{ height: `${day.count ? Math.max(8, (day.count / Math.max(maxActivity, 1)) * 100) : 0}%` }} />
                   </div>
                   <span>{day.label}</span>
                 </div>
@@ -133,15 +133,17 @@ export function DashboardPage({
           </div>
           <div className="talk-time-summary">
             <div className="talk-time-value">{formatTalkTime(stats.totalMinutes)}</div>
-            <div className="talk-time-detail">
-              <span className="talk-time-mark" />
-              <span>Across saved conversations</span>
-              <strong>{stats.totalConversations}</strong>
-            </div>
-            <div className="talk-time-detail">
-              <span className="talk-time-mark green" />
-              <span>Active voice agents</span>
-              <strong>{stats.activeAgents}</strong>
+            <div className="talk-time-details">
+              <div className="talk-time-detail">
+                <span className="talk-time-mark" />
+                <span>Across saved conversations</span>
+                <strong>{stats.totalConversations}</strong>
+              </div>
+              <div className="talk-time-detail">
+                <span className="talk-time-mark green" />
+                <span>Active voice agents</span>
+                <strong>{stats.activeAgents}</strong>
+              </div>
             </div>
           </div>
         </section>

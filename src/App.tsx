@@ -110,7 +110,12 @@ function AppShell() {
           lastActive: agent.lastActive ?? 'just now',
         }));
 
-        const nextDocuments = (documentsResponse.data as DocumentItem[]).map((doc) => ({
+        const documentPayload = documentsResponse.data;
+        const documentList = Array.isArray(documentPayload) ? documentPayload : documentPayload?.documents;
+        if (!Array.isArray(documentList)) {
+          throw new Error('The API returned an invalid documents response.');
+        }
+        const nextDocuments = documentList.map((doc) => ({
           ...doc,
           status: doc.status ?? 'ready',
         }));
@@ -351,13 +356,36 @@ function AppShell() {
     }
   }, []);
 
-  const getDocuments = useCallback(async (filters: DocumentFilters): Promise<DocumentItem[]> => {
+  const getDocuments = useCallback(async (
+    filters: DocumentFilters,
+  ): Promise<{ documents: DocumentItem[]; totalBytes: number | null; totalSize: string | null }> => {
     try {
       const response = await apiClient.get('/api/documents', { params: filters });
-      return (response.data as DocumentItem[]).map((document) => ({
+      const payload = response.data;
+      const isLegacyList = Array.isArray(payload);
+      const responseDocuments = isLegacyList ? payload : payload?.documents;
+      const totalBytes = isLegacyList ? null : payload?.totalBytes;
+      const totalSize = isLegacyList ? null : payload?.totalSize;
+
+      if (!Array.isArray(responseDocuments)) {
+        throw new Error('The API returned an invalid documents response.');
+      }
+
+      if (
+        !isLegacyList &&
+        (typeof totalBytes !== 'number' ||
+          !Number.isFinite(totalBytes) ||
+          totalBytes < 0 ||
+          typeof totalSize !== 'string')
+      ) {
+        throw new Error('The API returned invalid document storage totals.');
+      }
+
+      const documents = (responseDocuments as DocumentItem[]).map((document) => ({
         ...document,
         status: document.status ?? 'ready',
       }));
+      return { documents, totalBytes, totalSize };
     } catch (error) {
       throw new Error(apiErrorMessage(error, 'Could not search documents.'));
     }

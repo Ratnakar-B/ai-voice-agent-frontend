@@ -66,17 +66,6 @@ const formatFileSize = (input: string) => {
   return `${Math.max(1, Math.round(bytes))} B`;
 };
 
-const fileSizeInBytes = (input: string) => {
-  const match = input.trim().match(/^([\d.]+)\s*(bytes?|b|kb|kib|mb|mib|gb|gib)?$/i);
-  if (!match) return 0;
-  const amount = Number(match[1]);
-  const unit = (match[2] ?? 'B').toLowerCase();
-  return unit.startsWith('g') ? amount * 1024 ** 3
-    : unit.startsWith('m') ? amount * 1024 ** 2
-      : unit.startsWith('k') ? amount * 1024
-        : amount;
-};
-
 const formatDate = (value?: string) => {
   if (!value) return 'Date unavailable';
   const date = new Date(value);
@@ -99,7 +88,11 @@ export function KnowledgeBasePage({
   onAsk,
 }: {
   documents: DocumentItem[];
-  onGetDocuments: (filters: DocumentFilters) => Promise<DocumentItem[]>;
+  onGetDocuments: (filters: DocumentFilters) => Promise<{
+    documents: DocumentItem[];
+    totalBytes: number | null;
+    totalSize: string | null;
+  }>;
   onUpload: (file: File) => Promise<void>;
   onDelete: (documentId: string) => Promise<void>;
   onAsk: (question: string) => Promise<string>;
@@ -123,13 +116,15 @@ export function KnowledgeBasePage({
   const [visibleDocuments, setVisibleDocuments] = useState<DocumentItem[]>([]);
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(true);
   const [documentListError, setDocumentListError] = useState('');
+  const [totalBytes, setTotalBytes] = useState<number | null>(null);
+  const [totalSize, setTotalSize] = useState<string | null>(null);
+  const [storageStatsError, setStorageStatsError] = useState('');
   const documentRequestId = useRef(0);
   const chatInput = useRef<HTMLInputElement>(null);
 
   const readyCount = documents.filter((document) => document.status === 'ready').length;
   const pendingCount = documents.filter((document) => document.status === 'pending').length;
   const canAskDocuments = readyCount > 0 || pendingCount > 0;
-  const totalBytes = documents.reduce((sum, document) => sum + fileSizeInBytes(document.size), 0);
   const lastUploaded = latestUpload(documents);
   const lastUpdated = lastUploaded
     ? lastUploaded.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) === now.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
@@ -150,11 +145,19 @@ export function KnowledgeBasePage({
         sort,
       })
         .then((result) => {
-          if (!cancelled && requestId === documentRequestId.current) setVisibleDocuments(result);
+          if (!cancelled && requestId === documentRequestId.current) {
+            setVisibleDocuments(result.documents);
+            setTotalBytes(result.totalBytes);
+            setTotalSize(result.totalSize);
+            setStorageStatsError('');
+          }
         })
         .catch((error: unknown) => {
           if (!cancelled && requestId === documentRequestId.current) {
             setDocumentListError(error instanceof Error ? error.message : 'Could not load documents.');
+            setTotalBytes(null);
+            setTotalSize(null);
+            setStorageStatsError(error instanceof Error ? error.message : 'Could not load document storage total.');
           }
         })
         .finally(() => {
@@ -261,7 +264,7 @@ export function KnowledgeBasePage({
 
       <section className="knowledge-stats" aria-label="Knowledge base statistics">
         <article className="knowledge-stat stat-purple"><span><FileText size={20} /></span><div><small>Total documents</small><strong>{documents.length}</strong><em>{documents.length ? `${readyCount} indexed and ready` : 'Upload your first document'}</em></div></article>
-        <article className="knowledge-stat stat-green"><span><DatabaseIcon /></span><div><small>Total size</small><strong>{formatFileSize(String(totalBytes))}</strong><em>{documents.length ? 'Across your library' : 'No storage used'}</em></div></article>
+        <article className="knowledge-stat stat-green"><span><DatabaseIcon /></span><div><small>Total size</small><strong>{totalSize ?? '—'}</strong><em>{storageStatsError || (totalBytes === null ? 'Loading storage total…' : totalBytes > 0 ? 'Across your library' : 'No storage used')}</em></div></article>
         <article className="knowledge-stat stat-blue"><span><File size={20} /></span><div><small>Indexed files</small><strong>{readyCount}</strong><em>{documents.length ? `${Math.round((readyCount / documents.length) * 100)}% indexed` : 'Ready for AI answers'}</em></div></article>
         <article className="knowledge-stat stat-orange"><span><Clock3 size={20} /></span><div><small>Last updated</small><strong>{lastUpdated}</strong><em>{lastUploaded ? formatDate(lastUploaded.toISOString()) : 'No uploads yet'}</em></div></article>
       </section>

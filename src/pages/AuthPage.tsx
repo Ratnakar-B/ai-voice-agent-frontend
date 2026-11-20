@@ -45,9 +45,9 @@ export function AuthPage({
         <header className="auth-header">
           <div className="voice-brand">
             <span className="auth-brand-icon"><AudioLines size={19} /></span>
-            <span>VoiceAI</span>
+            <span>VoicePilot</span>
           </div>
-          <p className="header-copy">Talk. Automate. Grow.</p>
+          <p className="header-copy">Talk. Listen. Assist.</p>
         </header>
 
         <div className="hero-content">
@@ -79,10 +79,10 @@ export function AuthPage({
           ))}
         </div>
 
-        <div className="auth-stats" aria-label="VoiceAI platform highlights">
-          <div><strong>10K+</strong><span>Conversations</span></div>
+        <div className="auth-stats" aria-label="VoicePilot platform highlights">
+          <div><strong>20+</strong><span>Conversations</span></div>
           <div><strong>98%</strong><span>Success rate</span></div>
-          <div><strong>50+</strong><span>Businesses</span></div>
+          <div><strong>1+</strong><span>Businesses</span></div>
           <div><strong>24/7</strong><span>AI agents</span></div>
         </div>
       </section>
@@ -92,7 +92,7 @@ export function AuthPage({
           <div className="auth-card-brand">
             <span className="auth-brand-icon"><AudioLines size={19} /></span>
             <div>
-              <div className="mini-brand-title">VoiceAI</div>
+              <div className="mini-brand-title">VoicePilot</div>
               <div className="mini-brand-subtitle">AI voice platform</div>
             </div>
           </div>
