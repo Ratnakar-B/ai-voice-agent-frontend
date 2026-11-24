@@ -19,6 +19,8 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from 'react';
+import { ConfirmDeleteDialog } from '../components/ConfirmDeleteDialog';
+import { VoiceLoader } from '../components/VoiceLoader';
 import type { DocumentFilters, DocumentItem } from '../types';
 
 type DocumentType = 'pdf' | 'docx' | 'txt' | 'md' | 'csv' | 'other';
@@ -105,6 +107,7 @@ export function KnowledgeBasePage({
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [deletingId, setDeletingId] = useState('');
+  const [documentPendingDelete, setDocumentPendingDelete] = useState<DocumentItem | null>(null);
   const [isAsking, setIsAsking] = useState(false);
   const [showAsk, setShowAsk] = useState(false);
   const [search, setSearch] = useState('');
@@ -207,7 +210,7 @@ export function KnowledgeBasePage({
     event.preventDefault();
     const nextQuestion = question.trim();
     if (!nextQuestion) {
-      setChatError('Enter a question about your documents.');
+      setChatError('Enter a question.');
       return;
     }
 
@@ -225,7 +228,7 @@ export function KnowledgeBasePage({
       const response = await onAsk(nextQuestion);
       setMessages((current) => [...current, { role: 'assistant', content: response }]);
     } catch (error) {
-      setChatError(error instanceof Error ? error.message : 'Could not answer from your documents.');
+      setChatError(error instanceof Error ? error.message : 'Could not answer your question.');
     } finally {
       setIsAsking(false);
     }
@@ -241,12 +244,14 @@ export function KnowledgeBasePage({
     return () => document.removeEventListener('keydown', closeOnEscape);
   }, [showAsk]);
 
-  const deleteDocument = async (document: DocumentItem) => {
-    if (!window.confirm(`Delete "${document.name}" from your knowledge base?`)) return;
+  const confirmDeleteDocument = async () => {
+    if (!documentPendingDelete || deletingId) return;
+    const document = documentPendingDelete;
     setErrorMessage('');
     setDeletingId(document.id);
     try {
       await onDelete(document.id);
+      setDocumentPendingDelete(null);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Could not delete this document.');
     } finally {
@@ -284,7 +289,7 @@ export function KnowledgeBasePage({
           <input ref={fileInput} type="file" accept={ACCEPTED_TYPES} hidden disabled={isUploading} onChange={(event) => void handleFileChange(event)} />
           <UploadCloud className="knowledge-cloud-icon" size={38} />
           <div className="knowledge-upload-copy"><strong>{isUploading ? 'Uploading and indexing...' : isDragging ? 'Drop your document here' : 'Upload documents'}</strong><span>Drag and drop files here, or <b>click to browse</b></span><small>Supports PDF, DOCX, TXT, CSV, MD (Max 10MB per file)</small></div>
-          <button type="button" className="knowledge-upload-button" disabled={isUploading} onClick={(event) => { event.stopPropagation(); triggerUpload(); }}><FileUp size={16} />{isUploading ? 'Uploading...' : 'Upload document'}</button>
+          <button type="button" className="knowledge-upload-button" disabled={isUploading} onClick={(event) => { event.stopPropagation(); triggerUpload(); }}>{isUploading ? <VoiceLoader label="Uploading..." variant="inline" /> : <><FileUp size={16} />Upload document</>}</button>
         </div>
         <aside className="knowledge-guide">
           <h2>Help your AI agents with knowledge</h2>
@@ -317,7 +322,7 @@ export function KnowledgeBasePage({
             <p>{documentListError}</p>
           </div>
         ) : isLoadingDocuments ? (
-          <div className="knowledge-empty" role="status"><strong>Loading documents…</strong></div>
+          <VoiceLoader label="Loading your documents" variant="section" />
         ) : visibleDocuments.length > 0 ? (
           <div className={`knowledge-document-list${view === 'grid' ? ' is-grid' : ''}`}>
             {view === 'list' && <div className="knowledge-list-header" aria-hidden="true"><span /><strong>Document</strong><strong>Type</strong><strong>Size</strong><strong>Uploaded on</strong><strong>Status</strong><strong>Access</strong><span>Actions</span></div>}
@@ -332,7 +337,7 @@ export function KnowledgeBasePage({
                   <span className="knowledge-file-date">{formatDate(document.uploadedAt)}</span>
                   <span className={`knowledge-index-status status-${document.status}`}><i />{document.status === 'ready' ? 'Indexed' : document.status === 'pending' ? 'Needs indexing' : document.status === 'processing' ? 'Processing' : 'Failed'}</span>
                   <span className="knowledge-access"><Sparkles size={14} />AI ready</span>
-                  <button type="button" className="knowledge-delete" aria-label={`Delete ${document.name}`} disabled={deletingId === document.id} onClick={() => void deleteDocument(document)}>{deletingId === document.id ? <span className="knowledge-spinner" /> : <Trash2 size={16} />}</button>
+                  <button type="button" className="knowledge-delete" aria-label={`Delete ${document.name}`} disabled={deletingId === document.id} onClick={() => { setErrorMessage(''); setDocumentPendingDelete(document); }}>{deletingId === document.id ? <span className="knowledge-spinner" /> : <Trash2 size={16} />}</button>
                 </article>
               );
             })}
@@ -395,15 +400,16 @@ export function KnowledgeBasePage({
                     </div>
                   ))}
                   {isAsking && (
-                    <div className="knowledge-chat-message assistant" role="status">
+                    <div className="knowledge-chat-message assistant">
                       <span className="knowledge-chat-message-avatar"><Bot size={16} /></span>
-                      <div className="knowledge-chat-bubble knowledge-chat-thinking"><span /><span /><span />Searching your documents</div>
+                      <div className="knowledge-chat-bubble"><VoiceLoader label="Searching your documents" variant="inline" /></div>
                     </div>
                   )}
+
                 </div>
 
                 <form className="knowledge-chat-composer" onSubmit={(event) => void askQuestion(event)}>
-                  {!canAskDocuments && <p className="knowledge-ask-hint">Upload and index a document to ask document-specific questions. Greetings still work.</p>}
+                  {!canAskDocuments && <p className="knowledge-ask-hint">You can ask general questions now. Upload documents to get answers grounded in your knowledge base.</p>}
                   {pendingCount > 0 && readyCount === 0 && <p className="knowledge-ask-hint">Existing documents will be indexed when you ask a question.</p>}
                   {chatError && <p className="knowledge-chat-error" role="alert">{chatError}</p>}
                   <div className="knowledge-chat-input-row">
@@ -413,11 +419,11 @@ export function KnowledgeBasePage({
                       maxLength={2000}
                       value={question}
                       onChange={(event) => setQuestion(event.target.value)}
-                      placeholder="Ask a question about your documents..."
-                      aria-label="Question about documents"
+                      placeholder="Ask about your documents or anything else..."
+                      aria-label="Question"
                     />
-                    <button type="submit" className="knowledge-ask-submit" aria-label="Send question" disabled={isAsking || !question.trim() || (!canAskDocuments && !getQuickResponse(question))}>
-                      {isAsking ? 'Searching...' : <Send size={16} />}
+                    <button type="submit" className="knowledge-ask-submit" aria-label="Send question" disabled={isAsking || !question.trim()}>
+                      {isAsking ? <VoiceLoader label="Searching..." variant="inline" showLabel={false} /> : <Send size={16} />}
                     </button>
                   </div>
                   <small>AI responses may be inaccurate. Verify important details with the source documents.</small>
@@ -427,6 +433,17 @@ export function KnowledgeBasePage({
             </div>
           </section>
         </div>
+      )}
+
+      {documentPendingDelete && (
+        <ConfirmDeleteDialog
+          itemType="document"
+          itemName={documentPendingDelete.name}
+          isDeleting={Boolean(deletingId)}
+          errorMessage={errorMessage}
+          onCancel={() => setDocumentPendingDelete(null)}
+          onConfirm={() => void confirmDeleteDocument()}
+        />
       )}
     </div>
   );

@@ -4004,7 +4004,8 @@ button {
 .knowledge-answer { display: flex; align-items: flex-start; gap: 8px; padding: 10px; border: 1px solid rgba(99, 74, 184, 0.24); border-radius: 9px; background: rgba(55, 40, 100, 0.15); color: #bca8ff; }
 .knowledge-answer p { margin: 0; color: #d1d9e7; font-size: 0.69rem; line-height: 1.55; }
 
-.knowledge-chat-backdrop {
+.knowledge-chat-backdrop,
+.confirm-delete-backdrop {
   position: fixed;
   z-index: 1000;
   inset: 0;
@@ -4027,6 +4028,36 @@ button {
   background: #0c131f;
   box-shadow: 0 24px 90px rgba(0, 0, 0, 0.62);
 }
+
+.confirm-delete-backdrop { z-index: 1100; }
+.confirm-delete-dialog {
+  display: flex;
+  width: min(440px, 100%);
+  flex-direction: column;
+  gap: 16px;
+  padding: 21px;
+  border: 1px solid rgba(103, 120, 147, 0.3);
+  border-radius: 16px;
+  background: #0c131f;
+  box-shadow: 0 24px 90px rgba(0, 0, 0, 0.62);
+}
+.confirm-delete-header { display: flex; align-items: center; justify-content: space-between; }
+.confirm-delete-header > span { display: grid; width: 40px; height: 40px; place-items: center; border: 1px solid rgba(239, 91, 99, 0.3); border-radius: 12px; background: rgba(139, 43, 54, 0.18); color: #ff9a9f; }
+.confirm-delete-header > button { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid rgba(91, 109, 136, 0.2); border-radius: 9px; background: #111a28; color: #aab5c5; }
+.confirm-delete-header > button:hover:not(:disabled) { border-color: rgba(137, 101, 255, 0.48); color: #fff; }
+.confirm-delete-copy h2 { margin: 0; color: #edf0f7; font-size: 1rem; font-weight: 650; }
+.confirm-delete-copy p { margin: 8px 0 0; color: #9aa7ba; font-size: 0.75rem; line-height: 1.6; overflow-wrap: anywhere; }
+.confirm-delete-copy strong { color: #e2e8f1; font-weight: 650; }
+.confirm-delete-error { margin: 0; color: #ff9a9f; font-size: 0.7rem; line-height: 1.5; }
+.confirm-delete-actions { display: flex; justify-content: flex-end; gap: 9px; }
+.confirm-delete-actions button { display: inline-flex; min-height: 38px; align-items: center; justify-content: center; gap: 7px; padding: 0 12px; border: 1px solid rgba(91, 109, 136, 0.25); border-radius: 9px; font-size: 0.69rem; font-weight: 600; }
+.confirm-delete-cancel { background: #111a28; color: #c3ccda; }
+.confirm-delete-cancel:hover:not(:disabled) { border-color: rgba(137, 101, 255, 0.48); color: #fff; }
+.confirm-delete-confirm { border-color: rgba(239, 91, 99, 0.36) !important; background: #a5323e; color: #fff; }
+.confirm-delete-confirm:hover:not(:disabled) { background: #bd3b48; }
+.confirm-delete-actions button:disabled, .confirm-delete-header > button:disabled { cursor: wait; opacity: 0.6; }
+.confirm-delete-dialog button:focus-visible { outline: 2px solid #b9a2ff; outline-offset: 2px; }
+.confirm-delete-spinner { width: 13px; height: 13px; border: 2px solid rgba(199, 210, 224, 0.26); border-top-color: #e8edf5; border-radius: 50%; animation: knowledge-spin 0.7s linear infinite; }
 
 .knowledge-chat-header {
   display: flex;
@@ -6124,4 +6155,130 @@ html:has(.app-shell-dashboard) { scrollbar-gutter: auto; }
   .settings-primary-column .settings-card { padding: 14px; }
   .settings-primary-column .profile-detail-grid { gap: 8px; }
   .settings-primary-column .profile-detail { min-height: 54px; padding: 8px; }
+}
+
+.auth-form .input-wrap.has-error,
+.auth-form .input-wrap.has-error:focus-within {
+  border-color: rgba(248, 113, 113, 0.72);
+  box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.1);
+}
+
+.auth-field-error {
+  margin-top: 6px;
+  color: #fca5a5;
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.auth-form input::selection {
+  background: rgba(234, 182, 77, 0.38);
+  color: #fff;
+}
+
+.auth-form input:-webkit-autofill,
+.auth-form input:-webkit-autofill:hover,
+.auth-form input:-webkit-autofill:focus,
+.auth-form input:autofill {
+  -webkit-text-fill-color: #edf0f4;
+  caret-color: #edf0f4;
+  -webkit-box-shadow: 0 0 0 1000px #0a0d11 inset;
+  box-shadow: 0 0 0 1000px #0a0d11 inset;
+  transition: background-color 9999s ease-out;
+}
+
+.auth-copyright,
+.app-copyright {
+  color: #707985;
+  font-size: 0.64rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.auth-copyright { margin-top: 14px; }
+.app-copyright { margin-top: 12px; }
+
+.voice-loader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #d7dce5;
+}
+
+.voice-loader-section {
+  min-height: 150px;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.dashboard-main > .voice-loader-section {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: radial-gradient(ellipse at center, rgba(234, 182, 77, 0.08), transparent 38%), rgba(7, 11, 18, 0.97);
+}
+.playground-main > .voice-loader-section { min-height: 0; flex: 1; }
+
+.voice-loader-screen {
+  min-height: 100vh;
+  min-height: 100dvh;
+  flex-direction: column;
+  gap: 11px;
+  background: radial-gradient(ellipse at center, rgba(234, 182, 77, 0.08), transparent 38%), #070b12;
+}
+
+.voice-loader-mark {
+  position: relative;
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 1px solid rgba(234, 182, 77, 0.28);
+  border-radius: 15px;
+  background: linear-gradient(145deg, rgba(234, 182, 77, 0.13), rgba(234, 182, 77, 0.04));
+  color: #edbd60;
+  box-shadow: 0 0 28px rgba(234, 182, 77, 0.08);
+}
+
+.voice-loader-mark svg { animation: voice-loader-icon 1s ease-in-out infinite; }
+
+.voice-loader-label {
+  color: #a7afbb;
+  font-size: 0.76rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.voice-loader-inline {
+  min-height: 0;
+  flex-direction: row;
+  gap: 7px;
+  color: inherit;
+}
+
+.voice-loader-inline .voice-loader-mark {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: currentColor;
+  box-shadow: none;
+}
+
+.voice-loader-inline .voice-loader-label { color: inherit; font-size: inherit; }
+
+@keyframes voice-loader-icon {
+  0%, 100% { opacity: 0.65; transform: scale(0.92); }
+  50% { opacity: 1; transform: scale(1.06); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-loader-mark svg { animation: none; }
+}
+
+@media (max-width: 960px) {
+  .playground-main > .voice-loader-section { min-height: 220px; }
 }

@@ -46,6 +46,7 @@ export function Layout({ user, children }: { user: User; children: ReactNode }) 
         <div className="sidebar-card sidebar-scope-card">
           <AgentScopeNote />
         </div>
+        <footer className="app-copyright">© 2026 Ratnakar-Baalkundhi</footer>
       </aside>
 
       <main className={`main-panel${isDashboard ? ' dashboard-main' : ''}${isAgents ? ' agents-main' : ''}${isPlayground ? ' playground-main' : ''}${isKnowledge ? ' knowledge-main' : ''}${isConversations ? ' conversations-main' : ''}${isSettings ? ' settings-main' : ''}`}>

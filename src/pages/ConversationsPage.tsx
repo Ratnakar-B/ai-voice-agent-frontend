@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Activity, AudioLines, Check, Clock3, Copy, Headphones, MessageSquareText, Search, UsersRound } from 'lucide-react';
+import { VoiceLoader } from '../components/VoiceLoader';
 import type { Agent, Conversation, ConversationDetail, ConversationFilters, Stats } from '../types';
 
 type DateFilter = ConversationFilters['date'];
@@ -274,7 +275,7 @@ export function ConversationsPage({
               );
             })}
             {isLoadingList ? (
-              <div className="conversation-empty-list"><strong>Searching conversations…</strong></div>
+              <VoiceLoader label="Loading conversations" variant="section" />
             ) : conversationList.length === 0 && (
               <div className="conversation-empty-list">
                 <MessageSquareText size={22} />
@@ -318,7 +319,7 @@ export function ConversationsPage({
               </nav>
               <div className="conversation-detail-content">
                 {loadingId === selectedId ? (
-                  <div className="conversation-detail-empty">Loading saved transcript…</div>
+                  <VoiceLoader label="Loading saved transcript" variant="section" />
                 ) : activeTab === 'transcript' ? (
                   selectedConversation.messages.length ? (
                     <div className="conversation-transcript">
@@ -355,9 +356,15 @@ export function ConversationsPage({
             </>
           ) : (
             <div className="conversation-detail-empty">
-              <span className="conversation-detail-empty-icon"><MessageSquareText size={23} /></span>
-              <strong>{loadingId ? 'Loading conversation…' : 'Select a conversation'}</strong>
-              <span>Choose a saved call to review its transcript and details.</span>
+              {loadingId ? (
+                <VoiceLoader label="Loading conversation" variant="section" />
+              ) : (
+                <>
+                  <span className="conversation-detail-empty-icon"><MessageSquareText size={23} /></span>
+                  <strong>Select a conversation</strong>
+                  <span>Choose a saved call to review its transcript and details.</span>
+                </>
+              )}
             </div>
           )}
         </div>

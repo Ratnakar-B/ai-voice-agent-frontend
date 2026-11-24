@@ -1,6 +1,12 @@
 import { ArrowRight, AudioLines, BarChart3, Eye, EyeOff, FileText, Lock, Mail, Mic, PhoneCall, ShieldCheck } from 'lucide-react';
 import axios from 'axios';
 import { useState, type FormEvent } from 'react';
+import { VoiceLoader } from '../components/VoiceLoader';
+
+type AuthField = 'name' | 'email' | 'password';
+type AuthFieldErrors = Partial<Record<AuthField, string>>;
+
+const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
 export function AuthPage({
   onLogin,
@@ -15,18 +21,50 @@ export function AuthPage({
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<AuthFieldErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setErrorMessage('');
+    const normalizedName = name.trim();
+    const normalizedEmail = email.trim();
+    const nextFieldErrors: AuthFieldErrors = {};
+
+    if (mode === 'register' && !normalizedName) {
+      nextFieldErrors.name = 'Enter your name.';
+    } else if (mode === 'register' && normalizedName.length > 100) {
+      nextFieldErrors.name = 'Name must be 100 characters or fewer.';
+    }
+
+    if (!normalizedEmail) {
+      nextFieldErrors.email = 'Enter your email address.';
+    } else if (normalizedEmail.length > 254) {
+      nextFieldErrors.email = 'Email must be 254 characters or fewer.';
+    } else if (!isValidEmail(normalizedEmail)) {
+      nextFieldErrors.email = 'Enter a valid email address.';
+    }
+
+    if (!password) {
+      nextFieldErrors.password = 'Enter your password.';
+    } else if (password.length > 256) {
+      nextFieldErrors.password = 'Password must be 256 characters or fewer.';
+    } else if (mode === 'register' && password.length < 8) {
+      nextFieldErrors.password = 'Password must be at least 8 characters.';
+    }
+
+    setFieldErrors(nextFieldErrors);
+    if (Object.keys(nextFieldErrors).length > 0) return;
+
+    setEmail(normalizedEmail);
+    if (mode === 'register') setName(normalizedName);
     setIsSubmitting(true);
 
     try {
       if (mode === 'login') {
-        await onLogin(email, password);
+        await onLogin(normalizedEmail, password);
       } else {
-        await onRegister(name, email, password);
+        await onRegister(normalizedName, normalizedEmail, password);
       }
     } catch (error) {
       if (axios.isAxiosError<{ message?: string }>(error)) {
@@ -100,29 +138,68 @@ export function AuthPage({
           <h2>{mode === 'login' ? 'Welcome back' : 'Create your account'}</h2>
           <p className="subtitle">{mode === 'login' ? 'Sign in to your account to continue' : 'Create an account to get started'}</p>
 
-          <form key={mode} className="auth-form" onSubmit={handleSubmit}>
+          <form key={mode} className="auth-form" onSubmit={handleSubmit} noValidate>
             {mode === 'register' && (
               <label className="field-group">
-                <div className="input-wrap">
-                  <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Enter your name" autoComplete="name" required />
+                <div className={`input-wrap${fieldErrors.name ? ' has-error' : ''}`}>
+                  <input
+                    aria-label="Full name"
+                    aria-invalid={Boolean(fieldErrors.name)}
+                    aria-describedby={fieldErrors.name ? 'auth-name-error' : undefined}
+                    value={name}
+                    onChange={(event) => {
+                      setName(event.target.value);
+                      setFieldErrors((current) => ({ ...current, name: undefined }));
+                      setErrorMessage('');
+                    }}
+                    placeholder="Enter your name"
+                    autoComplete="name"
+                    maxLength={100}
+                    required
+                  />
                 </div>
+                {fieldErrors.name && <span className="auth-field-error" id="auth-name-error">{fieldErrors.name}</span>}
               </label>
             )}
 
             <label className="field-group">
-              <div className="input-wrap icon-left">
+              <div className={`input-wrap icon-left${fieldErrors.email ? ' has-error' : ''}`}>
                 <Mail size={16} />
-              <input aria-label="Email address" value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Email address" autoComplete={mode === 'login' ? 'username' : 'email'} required />
+                <input
+                  aria-label="Email address"
+                  aria-invalid={Boolean(fieldErrors.email)}
+                  aria-describedby={fieldErrors.email ? 'auth-email-error' : undefined}
+                  value={email}
+                  onChange={(event) => {
+                    setEmail(event.target.value);
+                    setFieldErrors((current) => ({ ...current, email: undefined }));
+                    setErrorMessage('');
+                  }}
+                  type="email"
+                  placeholder="Email address"
+                  autoComplete={mode === 'login' ? 'username' : 'email'}
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  maxLength={254}
+                  required
+                />
               </div>
+              {fieldErrors.email && <span className="auth-field-error" id="auth-email-error">{fieldErrors.email}</span>}
             </label>
 
             <label className="field-group">
-              <div className="input-wrap icon-left">
+              <div className={`input-wrap icon-left${fieldErrors.password ? ' has-error' : ''}`}>
                 <Lock size={16} />
                 <input
                   aria-label="Password"
+                  aria-invalid={Boolean(fieldErrors.password)}
+                  aria-describedby={fieldErrors.password ? 'auth-password-error' : undefined}
                   value={password}
-                  onChange={(event) => setPassword(event.target.value)}
+                  onChange={(event) => {
+                    setPassword(event.target.value);
+                    setFieldErrors((current) => ({ ...current, password: undefined }));
+                    setErrorMessage('');
+                  }}
                   type={showPassword ? 'text' : 'password'}
                   placeholder="Enter your password"
                   autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
@@ -140,12 +217,15 @@ export function AuthPage({
                   {showPassword ? <Eye size={16} /> : <EyeOff size={16} />}
                 </button>
               </div>
+              {fieldErrors.password && <span className="auth-field-error" id="auth-password-error">{fieldErrors.password}</span>}
             </label>
 
             {errorMessage && <p className="auth-error" role="alert">{errorMessage}</p>}
 
             <button type="submit" className="primary-submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}
+              {isSubmitting
+                ? <VoiceLoader label={mode === 'login' ? 'Signing in...' : 'Creating account...'} variant="inline" />
+                : mode === 'login' ? 'Sign in' : 'Create account'}
               {!isSubmitting && <ArrowRight size={18} />}
             </button>
           </form>
@@ -157,6 +237,7 @@ export function AuthPage({
               className="account-switch"
               onClick={() => {
                 setErrorMessage('');
+                setFieldErrors({});
                 setShowPassword(false);
                 setName('');
                 setEmail('');
@@ -168,6 +249,7 @@ export function AuthPage({
             </button>
           </div>
           <div className="auth-security"><ShieldCheck size={14} /> Secure sign-in</div>
+          <footer className="auth-copyright">© 2026 Ratnakar-Baalkundhi</footer>
         </div>
       </main>
     </div>

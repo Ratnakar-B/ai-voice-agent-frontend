@@ -2,6 +2,7 @@ import axios from 'axios';
 import { useCallback, useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { Layout } from './components/Layout';
+import { VoiceLoader } from './components/VoiceLoader';
 import { AgentsPage } from './pages/AgentsPage';
 import { AuthPage } from './pages/AuthPage';
 import { ConversationsPage } from './pages/ConversationsPage';
@@ -55,9 +56,14 @@ export default function App() {
 
 function AppShell() {
   const [user, setUser] = useState<User | null>(() => {
+    if (!localStorage.getItem('voicepilot-token')) return null;
     const saved = localStorage.getItem('voicepilot-user');
     return saved ? (JSON.parse(saved) as User) : null;
   });
+  const [isCheckingSession, setIsCheckingSession] = useState(() => Boolean(localStorage.getItem('voicepilot-token')));
+  const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(() =>
+    Boolean(user && localStorage.getItem('voicepilot-token')),
+  );
   const [agents, setAgents] = useState<Agent[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -71,22 +77,24 @@ function AppShell() {
 
   useEffect(() => {
     const token = localStorage.getItem('voicepilot-token');
-    if (!token) {
-      setUser(null);
-      return;
-    }
+    if (!token) return;
 
     apiClient
       .get('/api/auth/profile', { headers: { Authorization: `Bearer ${token}` } })
       .then((response) => {
         const nextUser = response.data as User;
+        setIsLoadingWorkspace(true);
         setUser(nextUser);
         localStorage.setItem('voicepilot-user', JSON.stringify(nextUser));
       })
       .catch(() => {
         localStorage.removeItem('voicepilot-token');
         localStorage.removeItem('voicepilot-user');
+        setIsLoadingWorkspace(false);
         setUser(null);
+      })
+      .finally(() => {
+        setIsCheckingSession(false);
       });
   }, []);
 
@@ -95,6 +103,9 @@ function AppShell() {
 
     const token = localStorage.getItem('voicepilot-token');
     if (!token) return;
+    let cancelled = false;
+    let hideLoaderTimer: number | undefined;
+    const requestStartedAt = Date.now();
 
     Promise.all([
       apiClient.get('/api/agents', { headers: { Authorization: `Bearer ${token}` } }),
@@ -103,6 +114,7 @@ function AppShell() {
       apiClient.get('/api/dashboard/stats', { headers: { Authorization: `Bearer ${token}` } }),
     ])
       .then(([agentsResponse, documentsResponse, conversationsResponse, statsResponse]) => {
+        if (cancelled) return;
         const nextAgents = (agentsResponse.data as Agent[]).map((agent) => ({
           ...agent,
           status: agent.status ?? 'active',
@@ -134,6 +146,7 @@ function AppShell() {
         });
       })
       .catch(() => {
+        if (cancelled) return;
         setAgents([]);
         setDocuments([]);
         setConversations([]);
@@ -143,7 +156,18 @@ function AppShell() {
           totalConversations: 0,
           totalMinutes: 0,
         });
+      })
+      .finally(() => {
+        const remainingLoaderTime = Math.max(0, 350 - (Date.now() - requestStartedAt));
+        hideLoaderTimer = window.setTimeout(() => {
+          if (!cancelled) setIsLoadingWorkspace(false);
+        }, remainingLoaderTime);
       });
+
+    return () => {
+      cancelled = true;
+      if (hideLoaderTimer !== undefined) window.clearTimeout(hideLoaderTimer);
+    };
   }, [user]);
 
   const handleLogin = async (email: string, password: string) => {
@@ -153,6 +177,7 @@ function AppShell() {
 
     localStorage.setItem('voicepilot-token', token);
     localStorage.setItem('voicepilot-user', JSON.stringify(nextUser));
+    setIsLoadingWorkspace(true);
     setUser(nextUser);
   };
 
@@ -163,6 +188,7 @@ function AppShell() {
 
     localStorage.setItem('voicepilot-token', token);
     localStorage.setItem('voicepilot-user', JSON.stringify(nextUser));
+    setIsLoadingWorkspace(true);
     setUser(nextUser);
   };
 
@@ -296,7 +322,8 @@ function AppShell() {
 
   const getVoicePreviewSession = async (voice: string): Promise<VoiceSession> => {
     try {
-      const response = await apiClient.post('/api/voice/preview', { voice });
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      const response = await apiClient.post('/api/voice/preview', { voice, timeZone });
       return response.data as VoiceSession;
     } catch (error) {
       throw new Error(apiErrorMessage(error, 'Could not preview this voice.'));
@@ -329,7 +356,7 @@ function AppShell() {
       );
       return response.data.answer as string;
     } catch (error) {
-      throw new Error(apiErrorMessage(error, 'Could not answer from your documents.'));
+      throw new Error(apiErrorMessage(error, 'Could not answer your question.'));
     }
   };
 
@@ -421,8 +448,13 @@ function AppShell() {
   const handleLogout = () => {
     localStorage.removeItem('voicepilot-token');
     localStorage.removeItem('voicepilot-user');
+    setIsLoadingWorkspace(false);
     setUser(null);
   };
+
+  if (isCheckingSession) {
+    return <VoiceLoader label="Securing your workspace" variant="screen" />;
+  }
 
   return (
     <Routes>
@@ -442,7 +474,7 @@ function AppShell() {
           )
         }
       >
-        <Route index element={<DashboardPage stats={stats} agents={agents} conversations={conversations} user={user!} />} />
+        <Route index element={<DashboardPage stats={stats} agents={agents} conversations={conversations} user={user!} isLoading={isLoadingWorkspace} />} />
         <Route
           path="agents"
           element={<AgentsPage agents={agents} onGetAgents={getAgents} onCreate={addAgent} onUpdate={updateAgent} onDelete={deleteAgent} onPreviewVoice={getVoicePreviewSession} />}
@@ -456,6 +488,7 @@ function AppShell() {
               clearTranscript={() => setTranscript([])}
               agents={agents}
               documents={documents}
+              isLoading={isLoadingWorkspace}
               onStartSession={startVoiceSession}
               onCreateTranscriptionTicket={createTranscriptionTicket}
               transcriptionWebSocketUrl={TRANSCRIPTION_WS_URL.toString()}

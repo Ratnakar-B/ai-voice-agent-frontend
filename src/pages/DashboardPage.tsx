@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { VoiceLoader } from '../components/VoiceLoader';
 import type { Agent, Conversation, Stats, User } from '../types';
 
 const formatTalkTime = (minutes: number) => {
@@ -48,11 +49,13 @@ export function DashboardPage({
   agents,
   conversations,
   user,
+  isLoading,
 }: {
   stats: Stats;
   agents: Agent[];
   conversations: Conversation[];
   user: User;
+  isLoading: boolean;
 }) {
   const [now] = useState(() => new Date());
   const hour = now.getHours();
@@ -66,7 +69,7 @@ export function DashboardPage({
     .sort((left, right) => new Date(right.startedAt ?? 0).getTime() - new Date(left.startedAt ?? 0).getTime());
   const recentAgents = [...agents];
 
-  return (
+  return isLoading ? <VoiceLoader label="Loading your dashboard" variant="section" /> : (
     <div className="dashboard-page">
       <header className="dashboard-header">
         <div>

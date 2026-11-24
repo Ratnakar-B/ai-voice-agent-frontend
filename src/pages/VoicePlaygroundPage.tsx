@@ -19,6 +19,7 @@ import {
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
+import { VoiceLoader } from '../components/VoiceLoader';
 import type { Agent, DocumentItem, VoiceSession } from '../types';
 
 const INPUT_SAMPLE_RATE = 16000;
@@ -77,9 +78,28 @@ function mergeTranscription(current: string, chunk: string): string {
   return `${previous} ${next}`;
 }
 
+function getNewTranscriptionText(committed: string, draft: string, incoming: string): string {
+  const text = incoming.trim();
+  const current = mergeTranscription(committed, draft);
+  if (current && text.toLocaleLowerCase().startsWith(current.toLocaleLowerCase())) {
+    return text.slice(current.length).trim();
+  }
+  if (draft) {
+    const mergedDraft = mergeTranscription(draft, text);
+    if (mergedDraft.toLocaleLowerCase() === draft.toLocaleLowerCase()) return '';
+    if (mergedDraft.toLocaleLowerCase().startsWith(draft.toLocaleLowerCase())) {
+      return mergedDraft.slice(draft.length).trim();
+    }
+  }
+  return text;
+}
+
 type LiveServerMessage = {
   setupComplete?: unknown;
   error?: { message?: string };
+  toolCall?: {
+    functionCalls?: Array<{ id?: string; name?: string; args?: Record<string, unknown> }>;
+  };
   serverContent?: {
     inputTranscription?: { text?: string; finished?: boolean };
     interimInputTranscription?: { text?: string };
@@ -165,6 +185,7 @@ export function VoicePlaygroundPage({
   clearTranscript,
   agents,
   documents,
+  isLoading,
   onStartSession,
   onCreateTranscriptionTicket,
   transcriptionWebSocketUrl,
@@ -176,6 +197,7 @@ export function VoicePlaygroundPage({
   clearTranscript: () => void;
   agents: Agent[];
   documents: DocumentItem[];
+  isLoading: boolean;
   onStartSession: (agentId: string, timeZone: string) => Promise<VoiceSession>;
   onCreateTranscriptionTicket: (sessionId: string) => Promise<string>;
   transcriptionWebSocketUrl: string;
@@ -191,10 +213,16 @@ export function VoicePlaygroundPage({
   const playbackSources = useRef<Set<AudioBufferSourceNode>>(new Set());
   const playbackCursor = useRef(0);
   const sessionId = useRef<string | null>(null);
+  const transcriptSaveQueue = useRef<Promise<void>>(Promise.resolve());
+  const committedInputTranscript = useRef('');
   const isMutedRef = useRef(false);
   const isEndingRef = useRef(false);
   const outputDraft = useRef('');
+  const inputDraft = useRef('');
+  const inputTranscriptTimer = useRef<number | null>(null);
   const transcriptionFinalResolver = useRef<(() => void) | null>(null);
+  const assistantTurnComplete = useRef(true);
+  const assistantTurnCompletionResolver = useRef<(() => void) | null>(null);
   const [interimTranscript, setInterimTranscript] = useState('');
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [isStarting, setIsStarting] = useState(false);
@@ -210,14 +238,39 @@ export function VoicePlaygroundPage({
     updateTranscript(`${role === 'user' ? 'You' : 'Agent'}: ${content}`);
     const activeSessionId = sessionId.current;
     if (!activeSessionId) return;
-    void onSaveMessage(activeSessionId, role, content).catch((error: unknown) => {
-      setErrorMessage(error instanceof Error ? error.message : 'Transcript could not be saved.');
+    transcriptSaveQueue.current = transcriptSaveQueue.current.then(async () => {
+      try {
+        await onSaveMessage(activeSessionId, role, content);
+      } catch (error: unknown) {
+        setErrorMessage(error instanceof Error ? error.message : 'Transcript could not be saved.');
+      }
     });
   };
 
   const flushTranscriptDrafts = () => {
     if (outputDraft.current.trim()) recordTranscript('assistant', outputDraft.current.trim());
     outputDraft.current = '';
+  };
+
+  const flushInputTranscript = () => {
+    if (inputTranscriptTimer.current !== null) {
+      window.clearTimeout(inputTranscriptTimer.current);
+      inputTranscriptTimer.current = null;
+    }
+    const content = inputDraft.current.trim();
+    inputDraft.current = '';
+    if (content) {
+      committedInputTranscript.current = mergeTranscription(committedInputTranscript.current, content);
+      recordTranscript('user', content);
+    }
+    setInterimTranscript('');
+    transcriptionFinalResolver.current?.();
+    transcriptionFinalResolver.current = null;
+  };
+
+  const scheduleInputTranscriptFlush = () => {
+    if (inputTranscriptTimer.current !== null) window.clearTimeout(inputTranscriptTimer.current);
+    inputTranscriptTimer.current = window.setTimeout(flushInputTranscript, 2000);
   };
 
   const endStoredSession = () => {
@@ -229,13 +282,17 @@ export function VoicePlaygroundPage({
     });
   };
 
-  const stopAudio = () => {
+  const stopMicrophone = () => {
     audioProcessor.current?.disconnect();
     microphoneSource.current?.disconnect();
     audioProcessor.current = null;
     microphoneSource.current = null;
     activeStream.current?.getTracks().forEach((track) => track.stop());
     activeStream.current = null;
+  };
+
+  const stopAudio = () => {
+    stopMicrophone();
     playbackSources.current.forEach((source) => {
       try {
         source.stop();
@@ -303,6 +360,21 @@ export function VoicePlaygroundPage({
     };
   };
 
+  const waitForAssistantTurnCompletion = () => {
+    if (assistantTurnComplete.current) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const timeout = window.setTimeout(() => {
+        assistantTurnCompletionResolver.current = null;
+        resolve();
+      }, 5000);
+      assistantTurnCompletionResolver.current = () => {
+        window.clearTimeout(timeout);
+        assistantTurnCompletionResolver.current = null;
+        resolve();
+      };
+    });
+  };
+
   const handleLiveMessage = (message: LiveServerMessage) => {
     if (message.error) {
       setErrorMessage(message.error.message ?? 'Gemini Live returned an error.');
@@ -313,9 +385,9 @@ export function VoicePlaygroundPage({
     }
 
     const content = message.serverContent;
-    if (!content) return;
+    let shouldEndCall = false;
 
-    if (content.interrupted) {
+    if (content?.interrupted) {
       playbackSources.current.forEach((source) => {
         try {
           source.stop();
@@ -327,18 +399,26 @@ export function VoicePlaygroundPage({
       playbackCursor.current = audioContext.current?.currentTime ?? 0;
     }
 
-    const output = content.outputTranscription;
-    if (output?.text) outputDraft.current = mergeTranscription(outputDraft.current, output.text);
+    const output = content?.outputTranscription;
+    if (output?.text) {
+      assistantTurnComplete.current = false;
+      const visibleOutput = output.text.replace(/\[END_CALL\]/gi, '').trim();
+      if (visibleOutput) outputDraft.current = mergeTranscription(outputDraft.current, visibleOutput);
+      if (/\[END_CALL\]/i.test(output.text)) shouldEndCall = true;
+    }
     if (output?.finished && outputDraft.current) {
       recordTranscript('assistant', outputDraft.current);
       outputDraft.current = '';
     }
 
-    if (content.turnComplete) {
+    if (content?.modelTurn?.parts?.length) assistantTurnComplete.current = false;
+    if (content?.turnComplete) {
+      assistantTurnComplete.current = true;
       flushTranscriptDrafts();
+      assistantTurnCompletionResolver.current?.();
     }
 
-    content.modelTurn?.parts?.forEach((part) => {
+    content?.modelTurn?.parts?.forEach((part) => {
       if (part.inlineData?.data && part.inlineData.mimeType?.startsWith('audio/pcm')) {
         try {
           playAudio(part.inlineData.data);
@@ -351,6 +431,25 @@ export function VoicePlaygroundPage({
         }
       }
     });
+
+    const endCallFunctions = message.toolCall?.functionCalls?.filter((call) => call.name === 'end_call');
+    if (endCallFunctions?.length) {
+      const socket = activeSocket.current;
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+          toolResponse: {
+            functionResponses: endCallFunctions.map((call) => ({
+              id: call.id,
+              name: call.name,
+              response: { result: 'The farewell is complete. End the call now.' },
+            })),
+          },
+        }));
+      }
+      shouldEndCall = true;
+    }
+
+    if (shouldEndCall && !isEndingRef.current) void endCall(true);
   };
 
   const connectTranscriptionSession = async (sessionId: string) => {
@@ -430,17 +529,31 @@ export function VoicePlaygroundPage({
           }
           return;
         }
-
         const content = message.serverContent;
         if (content?.interimInputTranscription?.text) {
-          setInterimTranscript(content.interimInputTranscription.text);
+          setInterimTranscript(
+            getNewTranscriptionText(
+              committedInputTranscript.current,
+              inputDraft.current,
+              content.interimInputTranscription.text,
+            ),
+          );
         }
         if (content?.inputTranscription?.text) {
-          const finalText = content.inputTranscription.text.trim();
-          if (finalText) recordTranscript('user', finalText);
-          setInterimTranscript('');
-          transcriptionFinalResolver.current?.();
-          transcriptionFinalResolver.current = null;
+          const newText = getNewTranscriptionText(
+            committedInputTranscript.current,
+            inputDraft.current,
+            content.inputTranscription.text,
+          );
+          if (newText) inputDraft.current = mergeTranscription(inputDraft.current, newText);
+          setInterimTranscript(inputDraft.current);
+          if (content.inputTranscription.finished || content.turnComplete) {
+            flushInputTranscript();
+          } else {
+            scheduleInputTranscriptFlush();
+          }
+        } else if (content?.turnComplete && inputDraft.current) {
+          flushInputTranscript();
         }
       };
 
@@ -501,6 +614,16 @@ export function VoicePlaygroundPage({
                 systemInstruction: { parts: [{ text: session.systemInstruction }] },
                 realtimeInputConfig: { automaticActivityDetection: { disabled: false } },
                 outputAudioTranscription: {},
+                tools: [{
+                  functionDeclarations: [{
+                    name: 'end_call',
+                    description: 'End the live voice call when the configured conversation script has reached its farewell or the caller is clearly finished.',
+                    parameters: {
+                      type: 'OBJECT',
+                      properties: {},
+                    },
+                  }],
+                }],
               },
             }),
           );
@@ -646,6 +769,8 @@ export function VoicePlaygroundPage({
       await context.resume();
 
       setStatusMessage('Microphone connected. Connecting to Gemini Live...');
+      committedInputTranscript.current = '';
+      inputDraft.current = '';
       sessionId.current = session.sessionId;
       await Promise.all([
         connectLiveSession(session),
@@ -707,24 +832,39 @@ export function VoicePlaygroundPage({
     }
   };
 
-  const endCall = async () => {
+  const endCall = async (afterAssistantPlayback = false) => {
     setErrorMessage('');
     isEndingRef.current = true;
     setIsEnding(true);
     setIsActive(false);
     setIsMuted(false);
-    flushTranscriptDrafts();
+    if (!afterAssistantPlayback) flushTranscriptDrafts();
     setInterimTranscript('');
+    if (afterAssistantPlayback) {
+      stopMicrophone();
+      await waitForAssistantTurnCompletion();
+      flushTranscriptDrafts();
+      const context = audioContext.current;
+      const playbackDelay = context
+        ? Math.max(0, playbackCursor.current - context.currentTime) * 1000
+        : 0;
+      if (playbackDelay > 0) {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, playbackDelay + 100));
+      }
+    }
     stopAudio();
 
     try {
       await finishTranscriptionSession();
+      flushInputTranscript();
       stopSocket();
+      await transcriptSaveQueue.current;
       if (sessionId.current) await onEndSession(sessionId.current);
       sessionId.current = null;
       setStatusMessage('Call ended. Your microphone is off.');
       updateTranscript('System: Call ended.');
     } catch (error) {
+      flushInputTranscript();
       stopSocket();
       setErrorMessage(getErrorMessage(error, 'Microphone stopped, but the voice session could not be closed.'));
     } finally {
@@ -740,7 +880,7 @@ export function VoicePlaygroundPage({
     (isActive ? `Connected to ${activeAgent?.name ?? 'your agent'}. Start speaking.` : 'Ready to talk');
   const agentInstructions = activeAgent?.instructions || 'Create an agent to add its instructions here.';
 
-  return (
+  return isLoading ? <VoiceLoader label="Preparing your voice workspace" variant="section" /> : (
     <div className="playground-page">
       <header className="playground-topbar">
         <div>
@@ -793,10 +933,16 @@ export function VoicePlaygroundPage({
               className={`playground-start-control ${isActive ? 'is-ending' : ''}`}
               disabled={isStarting || isEnding}
               aria-label={isActive ? 'End call' : 'Start call'}
-              onClick={isActive ? endCall : startCall}
+              onClick={isActive ? () => { void endCall(); } : () => { void startCall(); }}
             >
               {isActive ? <PhoneOff size={24} /> : <Mic size={24} />}
-              <span>{isStarting ? 'Connecting...' : isEnding ? 'Ending...' : isActive ? 'End call' : 'Start call'}</span>
+              <span>
+                {isStarting
+                  ? <VoiceLoader label="Connecting..." variant="inline" />
+                  : isEnding
+                    ? <VoiceLoader label="Ending call..." variant="inline" />
+                    : isActive ? 'End call' : 'Start call'}
+              </span>
             </button>
             <div className="playground-round-control output-control" aria-label="Gemini speaker output"><Volume2 size={20} /><span>Speaker</span></div>
           </div>

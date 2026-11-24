@@ -17,6 +17,8 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { ConfirmDeleteDialog } from '../components/ConfirmDeleteDialog';
+import { VoiceLoader } from '../components/VoiceLoader';
 import type { Agent, AgentFilters, VoiceSession } from '../types';
 
 type AgentInput = Omit<Agent, 'id' | 'lastActive' | 'conversationCount'>;
@@ -92,6 +94,7 @@ export function AgentsPage({
   const [isSaving, setIsSaving] = useState(false);
   const [updatingId, setUpdatingId] = useState('');
   const [deletingId, setDeletingId] = useState('');
+  const [agentPendingDelete, setAgentPendingDelete] = useState<Agent | null>(null);
   const [menuId, setMenuId] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<AgentFilters['status']>('all');
@@ -382,12 +385,15 @@ export function AgentsPage({
     }
   };
 
-  const removeAgent = async (agentId: string) => {
+  const removeAgent = async () => {
+    if (!agentPendingDelete || deletingId) return;
+    const agentId = agentPendingDelete.id;
     setErrorMessage('');
     setDeletingId(agentId);
     setMenuId('');
     try {
       await onDelete(agentId);
+      setAgentPendingDelete(null);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Could not delete this agent.');
     } finally {
@@ -511,7 +517,7 @@ export function AgentsPage({
             <label>Conversation script<textarea value={form.conversationScript} onChange={(event) => setForm({ ...form, conversationScript: event.target.value })} placeholder="Describe what the agent should say and do at each stage of the conversation." /><small>Give the agent a step-by-step flow. It will use the knowledge base to answer business questions and thank callers before ending.</small></label>
             {errorMessage && <p className="call-status error" role="alert">{errorMessage}</p>}
             <div className="action-row">
-              <button type="submit" className="primary-button" disabled={isSaving}>{isSaving ? 'Saving...' : editingId ? 'Save changes' : 'Create agent'}</button>
+              <button type="submit" className="primary-button" disabled={isSaving}>{isSaving ? <VoiceLoader label="Saving..." variant="inline" /> : editingId ? 'Save changes' : 'Create agent'}</button>
               <button type="button" className="ghost-button" disabled={isSaving} onClick={() => { stopVoicePreview(); setForm(null); setEditingId(null); }}>Cancel</button>
             </div>
           </form>
@@ -525,7 +531,7 @@ export function AgentsPage({
 
       <section className="agents-list" aria-label="Your voice agents">
         {isLoadingAgents ? (
-          <div className="agents-empty" role="status"><h2>Loading agents…</h2></div>
+          <VoiceLoader label="Loading voice agents" variant="section" />
         ) : visibleAgents.map((agent, index) => (
           <article className="agent-row" key={agent.id}>
             <div className={`agent-row-icon agent-color-${index % 5}`} aria-hidden="true">
@@ -570,7 +576,7 @@ export function AgentsPage({
                 {menuId === agent.id && (
                   <div className="agent-action-menu">
                     <button type="button" onClick={() => startEditing(agent)}><Pencil size={14} /> Edit agent</button>
-                    <button type="button" className="agent-delete-action" disabled={deletingId === agent.id} onClick={() => void removeAgent(agent.id)}><Trash2 size={14} /> {deletingId === agent.id ? 'Deleting...' : 'Delete agent'}</button>
+                    <button type="button" className="agent-delete-action" disabled={deletingId === agent.id} onClick={() => { setErrorMessage(''); setMenuId(''); setAgentPendingDelete(agent); }}><Trash2 size={14} /> Delete agent</button>
                   </div>
                 )}
               </div>
@@ -590,6 +596,17 @@ export function AgentsPage({
           </div>
         )}
       </section>
+
+      {agentPendingDelete && (
+        <ConfirmDeleteDialog
+          itemType="agent"
+          itemName={agentPendingDelete.name}
+          isDeleting={deletingId === agentPendingDelete.id}
+          errorMessage={errorMessage}
+          onCancel={() => setAgentPendingDelete(null)}
+          onConfirm={() => void removeAgent()}
+        />
+      )}
     </div>
   );
 }
